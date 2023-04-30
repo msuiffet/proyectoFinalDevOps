@@ -1,0 +1,107 @@
+# Pipeline de tipo Build para proyecto basado en Maven
+#Que realiza multiples stages para la verificacion del codigo 
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  dockerhub: 'expodevops'
+  repository: 'tarea02'
+  environment: 'produccion'
+
+stages:
+   - stage: SincronizacionCambios
+     jobs:
+      - job: SincronizacionCambios
+        steps:
+        - task: Maven@3
+          displayName: 'Limpieza del proyecto'
+          inputs:
+            mavenPomFile: 'pom.xml'
+            goals: 'clean'
+            
+   - stage: VerificacionCambios
+     jobs:
+      - job: VerificacionCambios
+        steps:
+        - task: Maven@3
+          displayName: 'Testeando el proyecto'
+          inputs:
+            mavenPomFile: 'pom.xml'
+            goals: 'test'
+            publishJUnitResults: true
+            javaHomeOption: 'JDKVersion'
+            mavenVersionOption: 'Default'
+            mavenAuthenticateFeed: false
+            effectivePomSkip: false
+             
+   - stage: PruebasCodeQuality
+     jobs:
+      - job: PruebasCodeQuality
+        steps:
+        - task: SonarQubePrepare@4
+          displayName: 'Preparando Analisis de Calidad en el codigo'
+          inputs:
+              SonarQube: 'svc-sonarqube'
+              scannerMode: 'Other'
+              extraProperties: |
+                sonar.projectKey=Tarea02
+                sonar.login=squ_7d6df266306162ef7e9eb89cb0285d9d4feb354e
+                sonar.sourceEncoding=UTF-8
+          enabled: true  
+        - task: Maven@3
+          displayName: 'Publicando Analisis de Calidad de codigo'
+          inputs:
+            mavenPomFile: 'pom.xml'
+            goals: 'clean package'
+            publishJUnitResults: true
+            javaHomeOption: 'JDKVersion'
+            mavenVersionOption: 'Default'
+            mavenAuthenticateFeed: false
+            effectivePomSkip: false
+            sonarQubeRunAnalysis: true
+          enabled: true   
+
+  # - stage: BuildArtefacto
+  #   jobs:
+  #    - job: BuildArtefacto
+  #      steps:
+  #        - task: Maven@3
+  #          displayName: 'Generando Artefacto'
+  #          inputs:
+  #            mavenPomFile: 'pom.xml'
+  #            jdkVersionOption: '1.8'
+  #            goal: package
+   
+
+   - stage: BuildImagenDocker
+     jobs:
+      - job: BuildandPushImagenDocker
+        steps:
+
+        - task: Maven@3
+          displayName: 'Generando Artefacto'
+          inputs:
+              mavenPomFile: 'pom.xml'
+              jdkVersionOption: '1.8'
+              goal: package
+        - task: Docker@2
+          displayName: Build
+          inputs:
+            containerRegistry: 'svc-dockerhub'
+            repository: $(dockerhub)/$(repository)
+            tag: $(appBuildNumber)
+            command: build  
+            Dockerfile: '**/Dockerfile'
+            arguments: '--build-arg environment=$(environment)' 
+
+        - task: Docker@2
+          displayName: push
+          inputs:
+            containerRegistry: 'svc-dockerhub'
+            repository: $(dockerhub)/$(repository)
+            command: push  
+            tag: $(appBuildNumber)
+ 
